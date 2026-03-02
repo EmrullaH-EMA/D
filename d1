@@ -1,0 +1,542 @@
+cd ~/quantum-trader/frontend
+
+# Next.js projesi oluştur
+npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias "@/*"
+
+# Bağımlılıklar
+npm install \
+    recharts \
+    framer-motion \
+    lucide-react \
+    zustand \
+    @tanstack/react-query \
+    axios \
+    ws \
+    date-fns \
+    clsx \
+    tailwind-merge
+
+# Tailwind config güncelle
+cat > tailwind.config.ts << 'EOF'
+import type { Config } from "tailwindcss";
+
+const config: Config = {
+  content: [
+    "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        slate: {
+          950: '#020617',
+          900: '#0f172a',
+          800: '#1e293b',
+          700: '#334155',
+        }
+      },
+      animation: {
+        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+      }
+    },
+  },
+  plugins: [],
+};
+export default config;
+EOF
+
+# Ana sayfa
+mkdir -p src/app
+cat > src/app/page.tsx << 'EOF'
+'use client';
+
+import { useState, useEffect } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, BarChart, Bar } from 'recharts';
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+  TrendingUp, 
+  TrendingDown, 
+  Activity, 
+  Brain, 
+  Shield, 
+  Clock, 
+  DollarSign,
+  BarChart3,
+  Settings,
+  Play,
+  Square,
+  AlertTriangle
+} from 'lucide-react';
+
+// Types
+interface BotStatus {
+  isRunning: boolean;
+  mode: 'paper' | 'live';
+  equity: number;
+  openPositions: Position[];
+  todayPnl: number;
+  winRate: number;
+  totalTrades: number;
+  currentRegime: string;
+  aiConfidence: number;
+}
+
+interface Position {
+  id: string;
+  symbol: string;
+  side: 'long' | 'short';
+  size: number;
+  entryPrice: number;
+  currentPrice: number;
+  pnl: number;
+  duration: number;
+}
+
+interface Trade {
+  id: string;
+  side: string;
+  entry: number;
+  exit: number;
+  pnl: number;
+  duration: number;
+  regime: string;
+}
+
+// Mock data generators
+const generateEquityData = () => {
+  const data = [];
+  let equity = 10000;
+  for (let i = 0; i < 100; i++) {
+    equity *= (1 + (Math.random() - 0.4) * 0.02);
+    data.push({
+      time: `T-${100-i}`,
+      equity: equity,
+      benchmark: 10000 * (1 + i * 0.001)
+    });
+  }
+  return data;
+};
+
+const generateTradeHistory = (): Trade[] => {
+  return Array.from({ length: 20 }, (_, i) => ({
+    id: `TRADE_${i}`,
+    side: Math.random() > 0.4 ? 'long' : 'short',
+    entry: 50000 + Math.random() * 5000,
+    exit: 50000 + Math.random() * 5000,
+    pnl: (Math.random() - 0.3) * 4,
+    duration: 15 + Math.random() * 30,
+    regime: ['bull_trend', 'bear_range', 'high_vol'][Math.floor(Math.random() * 3)]
+  }));
+};
+
+export default function Dashboard() {
+  const [activeTab, setActiveTab] = useState<'overview' | 'backtest' | 'trades' | 'settings'>('overview');
+  const [isRunning, setIsRunning] = useState(false);
+  const [mode, setMode] = useState<'paper' | 'live'>('paper');
+  const [equityData, setEquityData] = useState(generateEquityData());
+  const [trades, setTrades] = useState<Trade[]>(generateTradeHistory());
+  
+  const currentEquity = equityData[equityData.length - 1]?.equity || 10000;
+  const totalReturn = ((currentEquity - 10000) / 10000) * 100;
+  const winRate = (trades.filter(t => t.pnl > 0).length / trades.length) * 100;
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100">
+      {/* Header */}
+      <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur-xl sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-cyan-600 rounded-xl flex items-center justify-center">
+                <Brain className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
+                  QuantumTrader AI
+                </h1>
+                <p className="text-xs text-slate-400">v2.0 • Self-Evolving System</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4">
+              {/* Mode Toggle */}
+              <div className="flex items-center gap-2 bg-slate-800 rounded-lg p-1">
+                <button
+                  onClick={() => setMode('paper')}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                    mode === 'paper' 
+                      ? 'bg-emerald-500/20 text-emerald-400' 
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Paper
+                </button>
+                <button
+                  onClick={() => setMode('live')}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                    mode === 'live' 
+                      ? 'bg-red-500/20 text-red-400' 
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Live
+                </button>
+              </div>
+
+              {/* Start/Stop */}
+              <button
+                onClick={() => setIsRunning(!isRunning)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
+                  isRunning
+                    ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                    : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+                }`}
+              >
+                {isRunning ? (
+                  <><Square className="w-4 h-4" /> Durdur</>
+                ) : (
+                  <><Play className="w-4 h-4" /> Başlat</>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Navigation */}
+          <nav className="flex gap-6 mt-6">
+            {[
+              { id: 'overview', label: 'Genel Bakış', icon: Activity },
+              { id: 'backtest', label: 'Backtest', icon: BarChart3 },
+              { id: 'trades', label: 'İşlemler', icon: DollarSign },
+              { id: 'settings', label: 'Ayarlar', icon: Settings },
+            ].map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id as any)}
+                className={`flex items-center gap-2 pb-3 text-sm font-medium transition-all border-b-2 ${
+                  activeTab === item.id
+                    ? 'border-emerald-500 text-emerald-400'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <item.icon className="w-4 h-4" />
+                {item.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-6 py-8">
+        <AnimatePresence mode="wait">
+          {activeTab === 'overview' && (
+            <motion.div
+              key="overview"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="space-y-6"
+            >
+              {/* Stats Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <StatCard
+                  title="Toplam Sermaye"
+                  value={`$${currentEquity.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+                  change={totalReturn}
+                  icon={DollarSign}
+                  color="emerald"
+                />
+                <StatCard
+                  title="Açık Pozisyonlar"
+                  value={isRunning ? "3" : "0"}
+                  subtext="2 Long, 1 Short"
+                  icon={Activity}
+                  color="blue"
+                />
+                <StatCard
+                  title="AI Güven Skoru"
+                  value="78.5%"
+                  subtext="Yüksek Güven"
+                  icon={Brain}
+                  color="purple"
+                />
+                <StatCard
+                  title="Piyasa Rejimi"
+                  value="Bull Trend"
+                  subtext="Trend Gücü: 82%"
+                  icon={TrendingUp}
+                  color="orange"
+                />
+              </div>
+
+              {/* Charts */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Equity Chart */}
+                <div className="lg:col-span-2 bg-slate-900/50 border border-slate-800 rounded-2xl p-6">
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-lg font-semibold">Sermaye Eğrisi</h3>
+                    <div className="flex gap-2">
+                      {['1S', '1A', '3A', '1Y', 'Tümü'].map((period) => (
+                        <button
+                          key={period}
+                          className="px-3 py-1 text-xs font-medium rounded-md bg-slate-800 text-slate-400 hover:bg-slate-700 transition-colors"
+                        >
+                          {period}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="h-80">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={equityData}>
+                        <defs>
+                          <linearGradient id="colorEquity" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                            <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                        <XAxis dataKey="time" stroke="#475569" fontSize={12} />
+                        <YAxis stroke="#475569" fontSize={12} />
+                        <Tooltip 
+                          contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px' }}
+                          itemStyle={{ color: '#10b981' }}
+                        />
+                        <Area 
+                          type="monotone" 
+                          dataKey="equity" 
+                          stroke="#10b981" 
+                          strokeWidth={2}
+                          fillOpacity={1} 
+                          fill="url(#colorEquity)" 
+                        />
+                        <Line 
+                          type="monotone" 
+                          dataKey="benchmark" 
+                          stroke="#64748b" 
+                          strokeDasharray="5 5"
+                          strokeWidth={1}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Performance Metrics */}
+                <div className="space-y-4">
+                  <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6">
+                    <h3 className="text-lg font-semibold mb-4">Performans</h3>
+                    <div className="space-y-4">
+                      <MetricRow label="Win Rate" value={`${winRate.toFixed(1)}%`} />
+                      <MetricRow label="Profit Factor" value="1.85" />
+                      <MetricRow label="Sharpe Ratio" value="1.42" />
+                      <MetricRow label="Max Drawdown" value="-8.3%" negative />
+                      <MetricRow label="Ort. İşlem Süresi" value="24 dk" />
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6">
+                    <h3 className="text-lg font-semibold mb-4">Strateji Evrimi</h3>
+                    <div className="space-y-3">
+                      <EvolutionItem 
+                        generation={42}
+                        change="Entry: 70 → 75"
+                        impact="+12% WR"
+                        status="success"
+                      />
+                      <EvolutionItem 
+                        generation={41}
+                        change="Risk: Kelly → Adaptive"
+                        impact="-5% DD"
+                        status="success"
+                      />
+                      <EvolutionItem 
+                        generation={40}
+                        change="Timeframe: +5m"
+                        impact="Testing"
+                        status="pending"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Recent Trades */}
+              <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6">
+                <h3 className="text-lg font-semibold mb-4">Son İşlemler</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="text-left text-xs text-slate-500 border-b border-slate-800">
+                        <th className="pb-3 font-medium">ID</th>
+                        <th className="pb-3 font-medium">Yön</th>
+                        <th className="pb-3 font-medium">Giriş</th>
+                        <th className="pb-3 font-medium">Çıkış</th>
+                        <th className="pb-3 font-medium">PnL</th>
+                        <th className="pb-3 font-medium">Süre</th>
+                        <th className="pb-3 font-medium">Rejim</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm">
+                      {trades.slice(0, 5).map((trade) => (
+                        <tr key={trade.id} className="border-b border-slate-800/50">
+                          <td className="py-3 font-mono text-slate-400">{trade.id}</td>
+                          <td className="py-3">
+                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                              trade.side === 'long' 
+                                ? 'bg-emerald-500/20 text-emerald-400' 
+                                : 'bg-red-500/20 text-red-400'
+                            }`}>
+                              {trade.side.toUpperCase()}
+                            </span>
+                          </td>
+                          <td className="py-3">${trade.entry.toFixed(2)}</td>
+                          <td className="py-3">${trade.exit.toFixed(2)}</td>
+                          <td className={`py-3 font-medium ${
+                            trade.pnl > 0 ? 'text-emerald-400' : 'text-red-400'
+                          }`}>
+                            {trade.pnl > 0 ? '+' : ''}{trade.pnl.toFixed(2)}%
+                          </td>
+                          <td className="py-3 text-slate-400">{trade.duration.toFixed(0)} dk</td>
+                          <td className="py-3">
+                            <span className="text-xs px-2 py-1 rounded bg-slate-800 text-slate-300">
+                              {trade.regime}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {mode === 'live' && (
+                <div className="bg-amber-500/10 border border-amber-500/50 rounded-xl p-4 flex items-center gap-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-500" />
+                  <div>
+                    <p className="text-amber-200 font-medium">Canlı Mod Aktif</p>
+                    <p className="text-amber-200/70 text-sm">Gerçek para ile işlem yapılıyor. Risk yönetimi devrede.</p>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          )}
+
+          {activeTab === 'backtest' && (
+            <motion.div
+              key="backtest"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="space-y-6"
+            >
+              <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6">
+                <h2 className="text-2xl font-bold mb-6">Gelişmiş Backtest</h2>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-2">Başlangıç Tarihi</label>
+                    <input 
+                      type="date" 
+                      defaultValue="2023-01-01"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-2">Bitiş Tarihi</label>
+                    <input 
+                      type="date" 
+                      defaultValue="2024-01-01"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-2">Sermaye ($)</label>
+                    <input 
+                      type="number" 
+                      defaultValue={10000}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <button className="w-full bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-semibold py-3 rounded-xl transition-all">
+                  Backtest Başlat
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </main>
+    </div>
+  );
+}
+
+// Component Definitions
+function StatCard({ title, value, change, subtext, icon: Icon, color }: any) {
+  const colors = {
+    emerald: 'from-emerald-500 to-emerald-600',
+    blue: 'from-blue-500 to-blue-600',
+    purple: 'from-purple-500 to-purple-600',
+    orange: 'from-orange-500 to-orange-600',
+  };
+
+  return (
+    <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 hover:border-slate-700 transition-all">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-slate-400 text-sm mb-1">{title}</p>
+          <h3 className="text-2xl font-bold text-white">{value}</h3>
+          {change !== undefined && (
+            <p className={`text-sm mt-1 ${change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              {change >= 0 ? '↑' : '↓'} {Math.abs(change).toFixed(2)}%
+            </p>
+          )}
+          {subtext && <p className="text-xs text-slate-500 mt-1">{subtext}</p>}
+        </div>
+        <div className={`p-3 rounded-xl bg-gradient-to-br ${colors[color as keyof typeof colors]} bg-opacity-20`}>
+          <Icon className="w-6 h-6 text-white" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MetricRow({ label, value, negative = false }: { label: string, value: string, negative?: boolean }) {
+  return (
+    <div className="flex items-center justify-between py-2 border-b border-slate-800/50 last:border-0">
+      <span className="text-slate-400 text-sm">{label}</span>
+      <span className={`font-mono font-medium ${negative ? 'text-red-400' : 'text-emerald-400'}`}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function EvolutionItem({ generation, change, impact, status }: { generation: number, change: string, impact: string, status: 'success' | 'pending' | 'failed' }) {
+  const statusColors = {
+    success: 'bg-emerald-500',
+    pending: 'bg-amber-500',
+    failed: 'bg-red-500'
+  };
+
+  return (
+    <div className="flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg">
+      <div className={`w-2 h-2 rounded-full ${statusColors[status]} ${status === 'pending' ? 'animate-pulse' : ''}`} />
+      <div className="flex-1">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium">Gen {generation}</span>
+          <span className={`text-xs ${status === 'success' ? 'text-emerald-400' : 'text-amber-400'}`}>
+            {impact}
+          </span>
+        </div>
+        <p className="text-xs text-slate-400">{change}</p>
+      </div>
+    </div>
+  );
+}
+EOF
+
+# Geliştirme sunucusunu başlat
+npm run dev
